@@ -5,7 +5,6 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
-#include <sys/types.h>
 #include <windows.h>
 
 CachePage cache[CACHE_SIZE];
@@ -70,30 +69,43 @@ int lab2_fsync(int fd) {
   }
   return 0;
 }
-
 ssize_t lab2_read(int fd, void *buf, size_t count) {
   if ((uintptr_t)buf % PAGE_SIZE != 0) {
-    fprintf(stderr, "[ERROR] Buffer must be aligned to PAGE_SIZE.\n");
+    fprintf(stderr, "lab2_read: Buffer must be aligned to PAGE_SIZE.\n");
     return -1;
   }
 
   off_t file_offset = lseek(fd, 0, SEEK_CUR);
   if (file_offset == -1) {
-    perror("[ERROR] lab2_read: lseek failed");
+    perror("lab2_read: lseek failed to get current offset");
     return -1;
+  }
+
+  struct stat file_stat;
+  if (fstat(fd, &file_stat) == -1) {
+    perror("lab2_read: Failed to get file size");
+    return -1;
+  }
+
+  if (file_offset >= file_stat.st_size) {
+    return 0;
+  }
+
+  size_t max_readable = file_stat.st_size - file_offset;
+  if (count > max_readable) {
+    count = max_readable;
   }
 
   size_t total_read = 0;
 
   while (count > 0) {
-    off_t page_offset = file_offset / PAGE_SIZE * PAGE_SIZE;
+    off_t page_offset = (file_offset / PAGE_SIZE) * PAGE_SIZE;
     size_t page_pos = file_offset % PAGE_SIZE;
     size_t to_read = PAGE_SIZE - page_pos;
     if (to_read > count)
       to_read = count;
 
     int found = 0;
-
     for (int i = 0; i < CACHE_SIZE; i++) {
       if (cache[i].fd == fd && cache[i].page_offset == page_offset &&
           cache[i].is_valid) {
@@ -107,19 +119,31 @@ ssize_t lab2_read(int fd, void *buf, size_t count) {
       int evict_index = rand() % CACHE_SIZE;
 
       if (cache[evict_index].is_dirty) {
-        lseek(cache[evict_index].fd, cache[evict_index].page_offset, SEEK_SET);
-        write(cache[evict_index].fd, cache[evict_index].data, PAGE_SIZE);
+        if (lseek(cache[evict_index].fd, cache[evict_index].page_offset,
+                  SEEK_SET) == -1) {
+          perror("lab2_read: Failed to set file offset for eviction");
+          return -1;
+        }
+        if (write(cache[evict_index].fd, cache[evict_index].data, PAGE_SIZE) !=
+            PAGE_SIZE) {
+          perror("lab2_read: Failed to write evicted page to disk");
+          return -1;
+        }
       }
 
       cache[evict_index].fd = fd;
       cache[evict_index].page_offset = page_offset;
       cache[evict_index].is_dirty = 0;
       cache[evict_index].is_valid = 1;
-      lseek(fd, page_offset, SEEK_SET);
+
+      if (lseek(fd, page_offset, SEEK_SET) == -1) {
+        perror("lab2_read: lseek failed before disk read");
+        return -1;
+      }
 
       ssize_t disk_read = read(fd, cache[evict_index].data, PAGE_SIZE);
       if (disk_read == -1) {
-        perror("[ERROR] Failed to read from disk");
+        perror("lab2_read: Failed to read page from disk");
         return -1;
       }
 
@@ -133,15 +157,16 @@ ssize_t lab2_read(int fd, void *buf, size_t count) {
   }
 
   if (lseek(fd, file_offset, SEEK_SET) == -1) {
-    perror("[ERROR] lab2_read: lseek failed after read");
+    perror("lab2_read: lseek failed after read");
     return -1;
   }
+
   return total_read;
 }
 
 ssize_t lab2_write(int fd, const void *buf, size_t count) {
   if ((uintptr_t)buf % PAGE_SIZE != 0) {
-    fprintf(stderr, "Buffer must be aligned to PAGE_SIZE.\n");
+    fprintf(stderr, "lab2_write: Buffer must be aligned to PAGE_SIZE.\n");
     return -1;
   }
 
