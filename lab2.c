@@ -52,6 +52,38 @@ void cache_destroy() {
 
 int get_evict_index() { return rand() % CACHE_SIZE; }
 
+int cache_find_or_evict(int fd, off_t page_offset) {
+  int evict_index = get_evict_index();
+  for (int i = 0; i < CACHE_SIZE; i++) {
+    if (cache[i].fd == fd && cache[i].page_offset == page_offset &&
+        cache[i].is_valid) {
+      return i;
+    }
+  }
+
+  if (cache[evict_index].is_dirty) {
+    if (lseek(cache[evict_index].fd, cache[evict_index].page_offset,
+              SEEK_SET) == -1 ||
+        write(cache[evict_index].fd, cache[evict_index].data, PAGE_SIZE) !=
+            PAGE_SIZE) {
+      perror("cache_find_or_evict: Failed to write dirty page to disk");
+      return -1;
+    }
+  }
+
+  cache[evict_index].fd = fd;
+  cache[evict_index].page_offset = page_offset;
+  cache[evict_index].is_dirty = 0;
+  cache[evict_index].is_valid = 1;
+
+  if (lseek(fd, page_offset, SEEK_SET) == -1 ||
+      read(fd, cache[evict_index].data, PAGE_SIZE) == -1) {
+    perror("cache_find_or_evict: Failed to load page from disk");
+    return -1;
+  }
+  return evict_index;
+}
+
 int lab2_open(const char *path) {
   HANDLE hFile =
       CreateFile(path, GENERIC_READ | GENERIC_WRITE, 0, NULL, OPEN_EXISTING,
@@ -117,50 +149,12 @@ ssize_t lab2_read(int fd, void *buf, size_t count) {
     if (to_read > count)
       to_read = count;
 
-    int found = 0;
-    for (int i = 0; i < CACHE_SIZE; i++) {
-      if (cache[i].fd == fd && cache[i].page_offset == page_offset &&
-          cache[i].is_valid) {
-        memcpy(buf, cache[i].data + page_pos, to_read);
-        found = 1;
-        break;
-      }
+    int cache_index = cache_find_or_evict(fd, page_offset);
+    if (cache_index == -1) {
+      return -1;
     }
 
-    if (!found) {
-      int evict_index = get_evict_index();
-
-      if (cache[evict_index].is_dirty) {
-        if (lseek(cache[evict_index].fd, cache[evict_index].page_offset,
-                  SEEK_SET) == -1) {
-          perror("lab2_read: Failed to set file offset for eviction");
-          return -1;
-        }
-        if (write(cache[evict_index].fd, cache[evict_index].data, PAGE_SIZE) !=
-            PAGE_SIZE) {
-          perror("lab2_read: Failed to write evicted page to disk");
-          return -1;
-        }
-      }
-
-      cache[evict_index].fd = fd;
-      cache[evict_index].page_offset = page_offset;
-      cache[evict_index].is_dirty = 0;
-      cache[evict_index].is_valid = 1;
-
-      if (lseek(fd, page_offset, SEEK_SET) == -1) {
-        perror("lab2_read: lseek failed before disk read");
-        return -1;
-      }
-
-      ssize_t disk_read = read(fd, cache[evict_index].data, PAGE_SIZE);
-      if (disk_read == -1) {
-        perror("lab2_read: Failed to read page from disk");
-        return -1;
-      }
-
-      memcpy(buf, cache[evict_index].data + page_pos, to_read);
-    }
+    memcpy(buf, cache[cache_index].data + page_pos, to_read);
 
     file_offset += to_read;
     buf = (char *)buf + to_read;
@@ -184,43 +178,25 @@ ssize_t lab2_write(int fd, const void *buf, size_t count) {
 
   off_t file_offset = lseek(fd, 0, SEEK_CUR);
   if (file_offset == -1) {
-    perror("lab2_write: lseek failed");
+    perror("lab2_write: lseek failed to get current offset");
     return -1;
   }
 
   size_t total_written = 0;
   while (count > 0) {
-    off_t page_offset = file_offset / PAGE_SIZE * PAGE_SIZE;
+    off_t page_offset = (file_offset / PAGE_SIZE) * PAGE_SIZE;
     size_t page_pos = file_offset % PAGE_SIZE;
     size_t to_write = PAGE_SIZE - page_pos;
     if (to_write > count)
       to_write = count;
 
-    int found = 0;
-    for (int i = 0; i < CACHE_SIZE; i++) {
-      if (cache[i].fd == fd && cache[i].page_offset == page_offset &&
-          cache[i].is_valid) {
-        memcpy(cache[i].data + page_pos, buf, to_write);
-        cache[i].is_dirty = 1;
-        found = 1;
-        break;
-      }
+    int cache_index = cache_find_or_evict(fd, page_offset);
+    if (cache_index == -1) {
+      return -1;
     }
 
-    if (!found) {
-      int evict_index = get_evict_index();
-      if (cache[evict_index].is_dirty) {
-        lseek(cache[evict_index].fd, cache[evict_index].page_offset, SEEK_SET);
-        write(cache[evict_index].fd, cache[evict_index].data, PAGE_SIZE);
-      }
-      cache[evict_index].fd = fd;
-      cache[evict_index].page_offset = page_offset;
-      cache[evict_index].is_dirty = 1;
-      cache[evict_index].is_valid = 1;
-      lseek(fd, page_offset, SEEK_SET);
-      read(fd, cache[evict_index].data, PAGE_SIZE);
-      memcpy(cache[evict_index].data + page_pos, buf, to_write);
-    }
+    memcpy(cache[cache_index].data + page_pos, buf, to_write);
+    cache[cache_index].is_dirty = 1;
 
     file_offset += to_write;
     buf = (const char *)buf + to_write;
