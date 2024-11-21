@@ -14,6 +14,16 @@ void cache_init() {
     cache[i].fd = -1;
     cache[i].page_offset = 0;
     cache[i].data = (char *)_aligned_malloc(PAGE_SIZE, PAGE_SIZE);
+
+    if (cache[i].data == NULL) {
+      fprintf(stderr,
+              "cache_init: Failed to allocate memory for cache page %d\n", i);
+      for (int j = 0; j < i; j++) {
+        _aligned_free(cache[j].data);
+        cache[j].data = NULL;
+      }
+      exit(EXIT_FAILURE);
+    }
     memset(cache[i].data, 0, PAGE_SIZE);
     cache[i].is_dirty = 0;
     cache[i].is_valid = 0;
