@@ -51,7 +51,7 @@ void cache_destroy() {
   }
 }
 
-int get_evict_index() { return rand() % CACHE_SIZE; }
+//int get_evict_index() { return rand() % CACHE_SIZE; }
 
 int get_evict_index_lru() {
   size_t oldest_time = (size_t)-1;
