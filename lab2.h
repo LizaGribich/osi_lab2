@@ -31,6 +31,7 @@ typedef struct {
     char *data;
     int is_dirty;
     int is_valid;
+    size_t last_used;
 } CachePage;
 
 LAB2_API void cache_init();

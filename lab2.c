@@ -6,6 +6,7 @@
 #include <string.h>
 #include <sys/stat.h>
 #include <windows.h>
+#include <time.h>
 
 CachePage cache[CACHE_SIZE];
 
@@ -52,15 +53,33 @@ void cache_destroy() {
 
 int get_evict_index() { return rand() % CACHE_SIZE; }
 
+int get_evict_index_lru() {
+  size_t oldest_time = (size_t)-1;
+  int evict_index = 0;
+
+  for (int i = 0; i < CACHE_SIZE; i++) {
+    if (!cache[i].is_valid) {
+      return i;
+    }
+    if (cache[i].last_used < oldest_time) {
+      oldest_time = cache[i].last_used;
+      evict_index = i;
+    }
+  }
+
+  return evict_index;
+}
+
 int cache_find_or_evict(int fd, off_t page_offset) {
-  int evict_index = get_evict_index();
   for (int i = 0; i < CACHE_SIZE; i++) {
     if (cache[i].fd == fd && cache[i].page_offset == page_offset &&
         cache[i].is_valid) {
+      cache[i].last_used = clock();
       return i;
     }
   }
 
+  int evict_index = get_evict_index_lru();
   if (cache[evict_index].is_dirty) {
     if (lseek(cache[evict_index].fd, cache[evict_index].page_offset,
               SEEK_SET) == -1 ||
@@ -75,12 +94,14 @@ int cache_find_or_evict(int fd, off_t page_offset) {
   cache[evict_index].page_offset = page_offset;
   cache[evict_index].is_dirty = 0;
   cache[evict_index].is_valid = 1;
+  cache[evict_index].last_used = clock();
 
   if (lseek(fd, page_offset, SEEK_SET) == -1 ||
       read(fd, cache[evict_index].data, PAGE_SIZE) == -1) {
     perror("cache_find_or_evict: Failed to load page from disk");
     return -1;
   }
+
   return evict_index;
 }
 
