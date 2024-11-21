@@ -5,8 +5,8 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
-#include <windows.h>
 #include <time.h>
+#include <windows.h>
 
 CachePage cache[CACHE_SIZE];
 
@@ -51,7 +51,7 @@ void cache_destroy() {
   }
 }
 
-//int get_evict_index() { return rand() % CACHE_SIZE; }
+// int get_evict_index() { return rand() % CACHE_SIZE; }
 
 int get_evict_index_lru() {
   size_t oldest_time = (size_t)-1;
