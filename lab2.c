@@ -50,6 +50,8 @@ void cache_destroy() {
   }
 }
 
+int get_evict_index() { return rand() % CACHE_SIZE; }
+
 int lab2_open(const char *path) {
   HANDLE hFile =
       CreateFile(path, GENERIC_READ | GENERIC_WRITE, 0, NULL, OPEN_EXISTING,
@@ -126,7 +128,7 @@ ssize_t lab2_read(int fd, void *buf, size_t count) {
     }
 
     if (!found) {
-      int evict_index = rand() % CACHE_SIZE;
+      int evict_index = get_evict_index();
 
       if (cache[evict_index].is_dirty) {
         if (lseek(cache[evict_index].fd, cache[evict_index].page_offset,
@@ -206,7 +208,7 @@ ssize_t lab2_write(int fd, const void *buf, size_t count) {
     }
 
     if (!found) {
-      int evict_index = rand() % CACHE_SIZE;
+      int evict_index = get_evict_index();
       if (cache[evict_index].is_dirty) {
         lseek(cache[evict_index].fd, cache[evict_index].page_offset, SEEK_SET);
         write(cache[evict_index].fd, cache[evict_index].data, PAGE_SIZE);
